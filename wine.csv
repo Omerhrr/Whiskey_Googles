@@ -396,7 +396,7 @@ id,name,size,proof,abv,spirit_type,brand_id,popularity,image_url,avg_msrp,fair_p
 726,Macallan 12 Year Double Cask,750,86,43,Scotch,275,200,https://d1w35me0y6a2bb.cloudfront.net/newproducts/receG6KjSVyIbaKDW,64.77,92.88,78.49,993,86,267,640,396
 4789,Rabbit Hole Heigold,750,95,47.5,Bourbon,573,200,https://d1w35me0y6a2bb.cloudfront.net/newproducts/recCoQftqmg6fcbAn,62.47,68.6,66.99,988,97,254,637,397
 18521,Frank August Small Batch Bourbon,750,100,50,Bourbon,3794,200,https://d1w35me0y6a2bb.cloudfront.net/newproducts/reczkcV4Ne1e5FxB3,68.99,95.06,77.16,986,113,247,626,398
-16248,Kirkland Signature Small Batch,1000,92,46,Bourbon,1118,,,27.99,29.38,33.55,985,30,200,755,399
+16248,Kirkland Signature Small Batch,1000,92,46,Bourbon,https://www.thewhiskeyshelf.com/wp-content/uploads/2022/06/kirkland-barton-small-batch-bourbon-header.jpg,1118,,,27.99,29.38,33.55,985,30,200,755,399
 27294,Booker’s  Springfield Batch 2024-01,750,124.5,62.25,Bourbon,647,100028,https://d1w35me0y6a2bb.cloudfront.net/newproducts/afaabdc1-0e9d-46eb-a270-f6910ef2aac5,90,121.89,116.19,984,49,127,808,400
 20206,Larceny Small Batch,750,,46,Bourbon,587,,https://d1w35me0y6a2bb.cloudfront.net/newproducts/recwu4nkbnaXXJm3Q,27.49,38.99,31.99,984,33,277,674,400
 3616,Skrewball Peanut Butter Whiskey,750,70,35,Whiskey,719,200,https://d1w35me0y6a2bb.cloudfront.net/newproducts/recn6lpQastGrqR07,29.77,38.96,34.11,984,45,216,723,400

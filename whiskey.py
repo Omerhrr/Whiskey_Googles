@@ -4,27 +4,24 @@ import pandas as pd
 import streamlit as st
 import os
 import requests
-import pytesseract
+from paddleocr import PaddleOCR
 import re
 from fuzzywuzzy import fuzz
 from collections import Counter
-
-# Set Tesseract path (update for your system if needed)
-# For Windows: pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# For Linux/Mac, Tesseract is usually in PATH
-# pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'  # Uncomment and adjust if needed
+from concurrent.futures import ThreadPoolExecutor
 
 # Constants
 DATASET_PATH = "dataset"
 DESCRIPTORS_PATH = "descriptors"
 KEYPOINTS_PATH = "keypoints"
 CSV_FILE = "wine.csv"
-THRESHOLD = 30  # Stricter matching
-MIN_KEYPOINTS = 50  # Increased for robustness
-MIN_TEXT_SIMILARITY = 80  # Stricter text matching
+THRESHOLD = 30
+MIN_KEYPOINTS = 50
+MIN_TEXT_SIMILARITY = 80
 IMAGE_SIZE = (640, 480)
-MAX_REGIONS = 5  # Limit regions to process
-CONFIDENCE_THRESHOLD = 0.7  # Minimum combined confidence
+MAX_REGIONS = 5
+CONFIDENCE_THRESHOLD = 0.7
+OCR_CONFIDENCE_THRESHOLD = 0.8  # Filter low-confidence OCR results
 
 # Create directories
 os.makedirs(DATASET_PATH, exist_ok=True)
@@ -38,7 +35,7 @@ df['spirit_type'] = df['spirit_type'].fillna("Unknown").astype(str)
 for col in ['avg_msrp', 'fair_price', 'shelf_price']:
     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-# Extract keywords from whisky names
+# Extract keywords
 def extract_keywords(names):
     keywords = set()
     for name in names:
@@ -50,7 +47,7 @@ def extract_keywords(names):
 
 KEYWORDS = extract_keywords(df['name'])
 
-# Add Google Font and custom CSS for styling
+# Add Google Font and custom CSS
 st.markdown('<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">', unsafe_allow_html=True)
 st.markdown("""
     <style>
@@ -82,13 +79,35 @@ st.markdown("""
         padding: 15px;
         margin: 10px 0;
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+    }
+    .result-card:hover {
+        transform: scale(1.02);
     }
     .stDataFrame {
         border-radius: 10px;
         overflow: hidden;
+        background-color: white;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .stProgress .st-bo {
+        background-color: #8b4513;
+    }
+    @media (max-width: 600px) {
+        .stColumn {
+            width: 100% !important;
+            margin-bottom: 10px;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
+
+# Initialize PaddleOCR (only once)
+@st.cache_resource
+def init_paddle_ocr():
+    return PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)  # GPU disabled for Streamlit Cloud
+
+ocr = init_paddle_ocr()
 
 # Function to download images
 def download_image(url, save_path):
@@ -166,7 +185,7 @@ def load_reference_data():
             ]
     return ref_descriptors, ref_keypoints
 
-# Normalize image for consistent lighting
+# Normalize image
 def normalize_image(image):
     if len(image.shape) == 3:
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -179,41 +198,57 @@ def normalize_image(image):
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         return clahe.apply(image)
 
-# Detect potential label regions using contours and Tesseract
+# Detect label regions with PaddleOCR
 def detect_label_regions(image):
-    if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image
+    try:
+        # Convert to RGB for PaddleOCR
+        if len(image.shape) == 3:
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        
+        # Run PaddleOCR
+        results = ocr.ocr(img_rgb, cls=True)
+        if not results or not results[0]:
+            return [], image
+        
+        regions = []
+        bboxes = []
+        min_area = 0.01 * image.shape[0] * image.shape[1]
+        
+        for line in results[0]:
+            # Extract bounding box and text
+            box = line[0]
+            text = line[1][0]
+            confidence = line[1][1]
+            if confidence < OCR_CONFIDENCE_THRESHOLD or len(text.split()) < 3:
+                continue
+            
+            # Calculate bounding box coordinates
+            x_min = int(min(p[0] for p in box))
+            y_min = int(min(p[1] for p in box))
+            x_max = int(max(p[0] for p in box))
+            y_max = int(max(p[1] for p in box))
+            w, h = x_max - x_min, y_max - y_min
+            area = w * h
+            aspect_ratio = w / float(h) if h > 0 else 0
+            
+            if area > min_area and 0.5 < aspect_ratio < 2.0 and w > 100 and h > 100:
+                sub_image = image[y_min:y_max, x_min:x_max]
+                regions.append(sub_image)
+                bboxes.append((x_min, y_min, x_max, y_max))
+        
+        # Draw bounding boxes
+        img_with_boxes = image.copy()
+        for (x_min, y_min, x_max, y_max) in bboxes:
+            cv2.rectangle(img_with_boxes, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+        
+        regions = sorted(regions, key=lambda r: r.shape[0] * r.shape[1], reverse=True)[:MAX_REGIONS]
+        return regions, img_with_boxes
     
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    dilated = cv2.dilate(thresh, kernel, iterations=2)
-    
-    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    regions = []
-    bboxes = []
-    min_area = 0.01 * image.shape[0] * image.shape[1]
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > min_area:
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = w / float(h)
-            if 0.5 < aspect_ratio < 2.0 and w > 100 and h > 100:
-                sub_image = image[y:y+h, x:x+w]
-                text = extract_text(sub_image)
-                if text and len(text.split()) > 2:
-                    regions.append(sub_image)
-                    bboxes.append((x, y, x+w, y+h))
-    
-    img_with_boxes = image.copy()
-    for (x_min, y_min, x_max, y_max) in bboxes:
-        cv2.rectangle(img_with_boxes, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
-    
-    regions = sorted(regions, key=lambda r: r.shape[0] * r.shape[1], reverse=True)[:MAX_REGIONS]
-    return regions, img_with_boxes
+    except Exception as e:
+        st.warning(f"Label detection failed: {e}. Processing entire image.")
+        return [image], image
 
 # Compute query descriptors
 def compute_query_descriptors(query_img):
@@ -227,25 +262,35 @@ def preprocess_image_for_ocr(image):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     image = clahe.apply(image)
-    image = cv2.fastNlMeansDenoising(image, h=15)
-    image = cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, iterations=1)
+    image = cv2.fastNlMeansDenoising(image, h=10)  # Reduced denoising for PaddleOCR
     return image
 
-# Extract text using Tesseract
+# Extract text with PaddleOCR
 def extract_text(image):
     try:
-        image = preprocess_image_for_ocr(image)
-        text = pytesseract.image_to_string(image, lang='eng', config='--psm 6').strip()
-        if not text:
-            text = pytesseract.image_to_string(image, lang='eng', config='--psm 3').strip()
-        return text
+        # Convert to RGB for PaddleOCR
+        if len(image.shape) == 3:
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        
+        # Preprocess
+        img_rgb = preprocess_image_for_ocr(img_rgb)
+        
+        # Run PaddleOCR
+        results = ocr.ocr(img_rgb, cls=True)
+        if not results or not results[0]:
+            return ""
+        
+        # Combine high-confidence text
+        texts = [line[1][0] for line in results[0] if line[1][1] >= OCR_CONFIDENCE_THRESHOLD]
+        return ' '.join(texts).strip()
+    
     except Exception as e:
         st.warning(f"OCR failed: {e}. Proceeding with feature-based matching only.")
         return ""
 
-# Clean and match text with keyword focus
+# Clean and match text
 def clean_and_match_text(extracted_text, whiskey_name):
     if not extracted_text:
         return None
@@ -296,13 +341,24 @@ def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
 
     return best_match_id, max_good_matches
 
-# Validate if image likely contains a whiskey bottle
+# Validate bottle image
 def is_valid_bottle_image(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-    text = pytesseract.image_to_string(gray, lang='eng', config='--psm 6').strip()
-    return len(text.split()) > 0
+    try:
+        if len(image.shape) == 3:
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            img_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        
+        results = ocr.ocr(img_rgb, cls=True)
+        if not results or not results[0]:
+            return False
+        text = ' '.join([line[1][0] for line in results[0] if line[1][1] >= OCR_CONFIDENCE_THRESHOLD])
+        return len(text.split()) > 0
+    except Exception as e:
+        st.warning(f"Image validation failed: {e}. Assuming valid image.")
+        return True
 
-# Identify whiskey from sub-image
+# Identify whiskey
 def identify_whiskey(sub_img, ref_descriptors, ref_keypoints):
     sub_img = normalize_image(sub_img)
     sub_img_resized = cv2.resize(sub_img, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
@@ -384,7 +440,8 @@ def main():
     st.title("Whiskey Googles")
     st.markdown("<h2 style='text-align: center; color: #4a2c0b;'>Identify bottles or search the database</h2>", unsafe_allow_html=True)
 
-    if not os.path.exists(DESCRIPTORS_PATH) or len(os.listdir(DESCRIPTORS_PATH)) < 500 or not os.path.exists(KEYPOINTS_PATH) or len(os.listdir(KEYPOINTS_PATH)) < 500:
+    if not os.path.exists(DESCRIPTORS_PATH) or len(os.listdir(DESCRIPTORS_PATH)) < len(df) or \
+       not os.path.exists(KEYPOINTS_PATH) or len(os.listdir(KEYPOINTS_PATH)) < len(df):
         st.info("Preprocessing reference images. This may take a few minutes...")
         preprocess_references()
         st.success("Preprocessing complete!")
@@ -395,7 +452,7 @@ def main():
 
     with tab1:
         st.markdown("Upload an image containing one or more whiskey bottle labels to identify them. For best results, ensure each label is clearly visible and not overlapping.", unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
+        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"], key="image_uploader")
         
         if uploaded_file is not None:
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
@@ -414,9 +471,13 @@ def main():
                         st.info(f"Detected {len(regions)} potential whiskey label regions.")
                     
                     results = []
-                    for sub_img in regions:
-                        result = identify_whiskey(sub_img, ref_descriptors, ref_keypoints)
-                        results.append(result)
+                    with ThreadPoolExecutor() as executor:
+                        futures = [executor.submit(identify_whiskey, sub_img, ref_descriptors, ref_keypoints) for sub_img in regions]
+                        for future in futures:
+                            results.append(future.result())
+                
+                # Sort results by confidence
+                results = sorted(results, key=lambda x: x.get('confidence', 0), reverse=True)
                 
                 for i, result in enumerate(results):
                     col1, col2 = st.columns([1, 2])
@@ -432,15 +493,14 @@ def main():
                             st.write(f"**Shelf Price:** ${whisky_info['shelf_price']:.2f}")
                             st.write(f"**Total Score:** {whisky_info['total_score']}")
                             st.write(f"**Confidence Score:** {result['confidence']:.2f}")
-                            # st.write(f"**Extracted Text:** {result['extracted_text']}")
+                            st.write(f"**Extracted Text:** {result['extracted_text']}")
                             st.markdown("</div>", unsafe_allow_html=True)
                             if result["status"] == "low_confidence":
                                 st.warning(f"Low confidence match for {whisky_info['name']}. Verify the result.")
                             if result["text_match"] is None:
                                 st.warning("Text validation skipped due to OCR issues. Match based on image features only.")
                             elif not result["text_match"]:
-                                pass
-                                #st.warning(f"Text does not match (extracted: '{result['extracted_text']}'), but image features suggest {whisky_info['name']}.")
+                                st.warning(f"Text does not match (extracted: '{result['extracted_text']}'), but image features suggest {whisky_info['name']}.")
                         elif result["status"] == "insufficient_keypoints":
                             st.write("Insufficient keypoints detected in this region.")
                         elif result["status"] == "no_features":
@@ -448,6 +508,11 @@ def main():
                         else:
                             st.write("No match found for this region.")
                             st.write(f"**Extracted Text:** {result['extracted_text']}")
+        
+        # Add clear button
+        if st.button("Clear Image", key="clear_button"):
+            st.session_state.pop("image_uploader", None)
+            st.rerun()
 
     with tab2:
         search_whiskeys()

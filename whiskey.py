@@ -500,7 +500,8 @@ def main():
                             if result["text_match"] is None:
                                 st.warning("Text validation skipped due to OCR issues. Match based on image features only.")
                             elif not result["text_match"]:
-                                st.warning(f"Text does not match (extracted: '{result['extracted_text']}'), but image features suggest {whisky_info['name']}.")
+                                pass
+                                # st.warning(f"Text does not match (extracted: '{result['extracted_text']}'), but image features suggest {whisky_info['name']}.")
                         elif result["status"] == "insufficient_keypoints":
                             st.write("Insufficient keypoints detected in this region.")
                         elif result["status"] == "no_features":

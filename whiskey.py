@@ -452,7 +452,7 @@ def main():
 
     with tab1:
         st.markdown("Upload an image containing one or more whiskey bottle labels to identify them. For best results, ensure each label is clearly visible and not overlapping.", unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"], key="image_uploader")
+        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg", "webp"], key="image_uploader")
         
         if uploaded_file is not None:
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)

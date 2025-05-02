@@ -35,19 +35,14 @@ for col in ['avg_msrp', 'fair_price', 'shelf_price']:
 
 
 # Extract keywords from wine.csv
-def extract_keywords(df):
+def extract_keywords(df['name']):
     keywords = set()
-    # Extract from name column
-    if 'name' in df.columns:
-        for name in df['name'].dropna():
-            words = re.findall(r'\b\w+\b', name.lower())
-            words = [w for w in words if len(w) >= 3 and not w.isdigit()]
-            keywords.update(words)
-    # for name in df['name'].dropna():
-    #     words = re.findall(r'\b\w+\b', name.lower())
-    #     words = [w for w in words if len(w) >= 3 and not w.isdigit()]
-    #     keywords.update(words)
-    # Extract from spirit_type column
+  
+    for name in df['name'].dropna():
+        words = re.findall(r'\b\w+\b', name.lower())
+        words = [w for w in words if len(w) >= 3 and not w.isdigit()]
+        keywords.update(words)
+   # Extract from spirit_type column
     for spirit_type in df['spirit_type'].dropna():
         words = re.findall(r'\b\w+\b', spirit_type.lower())
         words = [w for w in words if len(w) >= 3 and not w.isdigit()]

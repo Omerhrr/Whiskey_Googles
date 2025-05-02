@@ -38,10 +38,15 @@ for col in ['avg_msrp', 'fair_price', 'shelf_price']:
 def extract_keywords(df):
     keywords = set()
     # Extract from name column
-    for name in df['name'].dropna():
-        words = re.findall(r'\b\w+\b', name.lower())
-        words = [w for w in words if len(w) >= 3 and not w.isdigit()]
-        keywords.update(words)
+    if 'name' in df.columns:
+        for title in df['title'].dropna():
+            words = re.findall(r'\b\w+\b', title.lower())
+            words = [w for w in words if len(w) >= 3 and not w.isdigit()]
+            keywords.update(words)
+    # for name in df['name'].dropna():
+    #     words = re.findall(r'\b\w+\b', name.lower())
+    #     words = [w for w in words if len(w) >= 3 and not w.isdigit()]
+    #     keywords.update(words)
     # Extract from spirit_type column
     for spirit_type in df['spirit_type'].dropna():
         words = re.findall(r'\b\w+\b', spirit_type.lower())

@@ -39,8 +39,8 @@ def extract_keywords(df):
     keywords = set()
     # Extract from name column
     if 'name' in df.columns:
-        for title in df['title'].dropna():
-            words = re.findall(r'\b\w+\b', title.lower())
+        for name in df['name'].dropna():
+            words = re.findall(r'\b\w+\b', name.lower())
             words = [w for w in words if len(w) >= 3 and not w.isdigit()]
             keywords.update(words)
     # for name in df['name'].dropna():

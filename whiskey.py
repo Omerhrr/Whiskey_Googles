@@ -143,7 +143,16 @@ st.markdown("""
         }
     }
     </style>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True) 
+page_bg_color = """
+<style>
+    .stApp {
+        background-color: #f0f0f0;
+    }
+</style>
+"""
+
+st.markdown(page_bg_color, unsafe_allow_html=Tru
 
 # Initialize PaddleOCR with improved settings
 @st.cache_resource

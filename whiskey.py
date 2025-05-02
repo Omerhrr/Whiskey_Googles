@@ -32,14 +32,55 @@ df['spirit_type'] = df['spirit_type'].fillna("Unknown").astype(str)
 for col in ['avg_msrp', 'fair_price', 'shelf_price']:
     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-# Extract keywords
-def extract_keywords(names):
+
+
+# Extract keywords from wine.csv
+def extract_keywords(df):
     keywords = set()
-    for name in names:
+    # Extract from name column
+    for name in df['name'].dropna():
         words = re.findall(r'\b\w+\b', name.lower())
-        words = [w for w in words if len(w) > 2 and not w.isdigit()]  # Relaxed length filter
+        words = [w for w in words if len(w) >= 3 and not w.isdigit()]
         keywords.update(words)
-    keywords.update(['whisky', 'whiskey', 'single', 'malt', 'bourbon', 'scotch', 'reserve'])
+    # Extract from spirit_type column
+    for spirit_type in df['spirit_type'].dropna():
+        words = re.findall(r'\b\w+\b', spirit_type.lower())
+        words = [w for w in words if len(w) >= 3 and not w.isdigit()]
+        keywords.update(words)
+    # Add exhaustive whisky-related keywords
+    keywords.update([
+        'whisky', 'whiskey', 'single', 'malt', 'bourbon', 'scotch', 'reserve', 'distillery', 'aged', 'cask', 'proof',
+        'blanton', 'eagle', 'taylor', 'buffalo', 'weller', 'stagg', 'mckenna', 'heaven', 'hill', 'elijah', 'craig',
+        'knob', 'creek', 'sazerac', 'wild', 'turkey', 'woodford', 'russell', 'forester', 'rock', 'farms', 'smoke',
+        'wagon', 'caribou', 'crossing', 'evan', 'williams', 'four', 'roses', 'angel', 'envy', 'willett', 'michter',
+        'booker', 'pappy', 'van', 'winkle', 'traveller', 'george', 'jack', 'daniel', 'blade', 'bow', 'maker', 'mark',
+        'high', 'west', 'william', 'larue', 'widow', 'jane', 'penelope', 'baker', 'larceny', 'benchmark', 'yellowstone',
+        'ezra', 'brooks', 'double', 'eagle', 'coy', 'basil', 'hayden', 'redwood', 'empire', 'pipe', 'dream', 'lost',
+        'monarch', 'hancock', 'president', 'thomas', 'handy', 'peerless', 'cream', 'joseph', 'magnus', 'calumet',
+        'dickel', 'little', 'book', 'john', 'bowman', 'noah', 'mill', 'kentucky', 'owl', 'tub', 'new', 'riff', 'uncle',
+        'nearest', 'blood', 'oath', 'cooper', 'craft', 'remus', 'repeal', 'belle', 'meade', 'monkey', 'shoulder',
+        'james', 'pepper', 'rabbit', 'hole', 'castle', 'key', 'horse', 'soldier', 'blue', 'note', 'run', 'green', 'river',
+        'barrell', 'seagrass', 'whistle', 'pig', 'pikesville', 'jefferson', 'lagavulin', 'mellow', 'corn', 'grizzly',
+        'beast', 'yamazaki', 'hibiki', 'bib', 'tucker', 'sagamore', 'kirkland', 'evans', 'redbreast', 'crown', 'royal',
+        'jameson', 'black', 'spot', 'glenfiddich', 'nikka', 'tito', 'vodka', 'lux', 'row', 'johnnie', 'walker',
+        'wilderness', 'trail', 'legent', 'rio', 'frey', 'ranch', 'fortaleza', 'tequila', 'alberta', 'premium', 'chicken',
+        'cock', 'bernheim', 'eric', 'church', 'thirteenth', 'colony', 'noble', 'oak', 'woodinville', 'frank', 'august',
+        'skrewball', 'peanut', 'butter', 'macallan', 'heaven', 'door', 'garrison', 'brothers', 'balmorhea', 'clase',
+        'azul', 'reposado', 'don', 'julio', 'hendrick', 'gin', 'king', 'balvenie', 'glenlivet', 'laphroaig', 'blackened',
+        'brother', 'bond', 'rittenhouse', 'naber', 'orphan', 'fabel', 'folly', 'original', 'barrel', 'rare', 'year',
+        'small', 'batch', 'antique', 'special', 'full', 'toasted', 'bond', 'bonded', 'straight', 'rye', 'breed', 'oaked',
+        'prohibition', 'fine', 'wheated', 'select', 'midwinter', 'night', 'dram', 'act', 'scene', 'sour', 'mash',
+        'architect', 'strength', 'sinatra', 'black', 'family', 'statesman', 'decade', 'release', 'crossing', 'unfiltered',
+        'uncut', 'maple', 'smoked', 'marriage', 'campfire', 'mighty', 'storyteller', 'apprentice', 'piggyback', 'longbranch',
+        'peach', 'salt', 'caramel', 'triple', 'distilled', 'sherry', 'experimental', 'vintage', 'invitation', 'confiscated',
+        'anniversary', 'heritage', 'collection', 'soft', 'red', 'wheat', 'wood', 'finish', 'heart', 'kentucky', 'spirit',
+        'juke', 'joint', 'private', 'selection', 'emerald', 'giant', 'screaming', 'titan', 'stouted', 'homestead', 'amaranth',
+        'blended', 'subtle', 'smoke', 'dovetail', 'very', 'landmark', 'ocean', 'sea', 'voyage', 'french', 'oaked', 'musician',
+        'cellar', 'blue', 'label', 'takumi', 'port', 'valencia', 'rosé', 'fusion', 'discovery', 'derby', 'gentleman', 'grain',
+        'glass', 'bourye', 'twice', 'barreled', 'oloroso', 'malted', 'path', 'taken', 'rack', 'cigar', 'blend', 'harmony',
+        'dark', 'retrospect', 'amburana', 'coffee', 'jts', 'brown', 'declaration', 'halloween', 'coffey', 'crossroads',
+        'distiller', 'vault', 'malt', 'experimental', 'barrelhouse', 'cut', 'regal', 'apple', 'infinite', 'project'
+    ])
     return keywords
 
 KEYWORDS = extract_keywords(df['name'])

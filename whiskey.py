@@ -152,7 +152,7 @@ page_bg_color = """
 </style>
 """
 
-st.markdown(page_bg_color, unsafe_allow_html=Tru
+st.markdown(page_bg_color, unsafe_allow_html=True)
 
 # Initialize PaddleOCR with improved settings
 @st.cache_resource

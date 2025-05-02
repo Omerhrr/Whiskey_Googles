@@ -7,26 +7,23 @@ import requests
 from paddleocr import PaddleOCR
 import re
 from fuzzywuzzy import fuzz
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
+import h5py
 
 # Constants
 DATASET_PATH = "dataset"
-DESCRIPTORS_PATH = "descriptors"
-KEYPOINTS_PATH = "keypoints"
+HDF5_PATH = "reference_data.h5"
 CSV_FILE = "wine.csv"
 THRESHOLD = 30
 MIN_KEYPOINTS = 50
 MIN_TEXT_SIMILARITY = 80
-IMAGE_SIZE = (640, 480)
+IMAGE_SIZE = (320, 240)  # Reduced for speed
 MAX_REGIONS = 5
 CONFIDENCE_THRESHOLD = 0.7
-OCR_CONFIDENCE_THRESHOLD = 0.8  # Filter low-confidence OCR results
+OCR_CONFIDENCE_THRESHOLD = 0.8
 
-# Create directories
+# Create dataset directory
 os.makedirs(DATASET_PATH, exist_ok=True)
-os.makedirs(DESCRIPTORS_PATH, exist_ok=True)
-os.makedirs(KEYPOINTS_PATH, exist_ok=True)
 
 # Load and clean CSV
 df = pd.read_csv(CSV_FILE)
@@ -102,14 +99,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize PaddleOCR (only once)
+# Initialize PaddleOCR
 @st.cache_resource
 def init_paddle_ocr():
-    return PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)  # GPU disabled for Streamlit Cloud
+    return PaddleOCR(use_angle_cls=False, lang='en', use_gpu=False)
 
 ocr = init_paddle_ocr()
 
-# Function to download images
+# Download image
 def download_image(url, save_path):
     try:
         response = requests.get(url, stream=True)
@@ -124,30 +121,37 @@ def download_image(url, save_path):
 
 # Preprocess reference images
 def preprocess_references():
-    progress_bar = st.progress(0)
-    total_images = len(df)
-    for i, (idx, row) in enumerate(df.iterrows()):
-        image_url = row['image_url']
-        image_path = os.path.join(DATASET_PATH, f"{idx}.jpg")
-        descriptor_path = os.path.join(DESCRIPTORS_PATH, f"{idx}.npy")
-        keypoint_path = os.path.join(KEYPOINTS_PATH, f"{idx}_kp.npy")
-
-        if os.path.exists(descriptor_path) and os.path.exists(keypoint_path):
-            continue
-        
-        if not os.path.exists(image_path):
-            download_image(image_url, image_path)
-        
-        if os.path.exists(image_path):
-            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                try:
+    if os.path.exists(HDF5_PATH):
+        return
+    
+    st.info("Preprocessing reference images. This may take a few minutes...")
+    
+    # Parallel image downloads
+    def download_image_task(idx, url, path):
+        if not os.path.exists(path):
+            download_image(url, path)
+    
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(download_image_task, idx, row['image_url'], os.path.join(DATASET_PATH, f"{idx}.jpg"))
+            for idx, row in df.iterrows()
+        ]
+        for future in futures:
+            future.result()
+    
+    # Process and save to HDF5
+    with h5py.File(HDF5_PATH, 'w') as f:
+        for idx, row in df.iterrows():
+            image_path = os.path.join(DATASET_PATH, f"{idx}.jpg")
+            if os.path.exists(image_path):
+                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                if img is not None:
                     img = cv2.resize(img, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
                     img = normalize_image(img)
-                    orb = cv2.ORB_create()
+                    orb = cv2.ORB_create(nfeatures=500)
                     kp, des = orb.detectAndCompute(img, None)
                     if des is not None and len(kp) > 0:
-                        np.save(descriptor_path, des)
+                        f.create_dataset(f"descriptors/{idx}", data=des)
                         kp_data = np.array([
                             (k.pt[0], k.pt[1], k.size, k.angle, k.response, k.octave, k.class_id)
                             for k in kp
@@ -156,75 +160,62 @@ def preprocess_references():
                             ('angle', np.float32), ('response', np.float32),
                             ('octave', np.int32), ('class_id', np.int32)
                         ])
-                        np.save(keypoint_path, kp_data)
-                    else:
-                        st.warning(f"No descriptors or keypoints found for ID {idx}")
-                except Exception as e:
-                    st.error(f"Error processing image ID {idx}: {e}")
-            else:
-                st.warning(f"Failed to load image for ID {idx}")
-        
-        progress_bar.progress((i + 1) / total_images)
+                        f.create_dataset(f"keypoints/{idx}", data=kp_data)
+    
+    st.success("Preprocessing complete!")
 
 # Load reference data
+@st.cache_resource
 def load_reference_data():
     ref_descriptors = {}
     ref_keypoints = {}
-    for idx in df.index:
-        descriptor_path = os.path.join(DESCRIPTORS_PATH, f"{idx}.npy")
-        keypoint_path = os.path.join(KEYPOINTS_PATH, f"{idx}_kp.npy")
-        if os.path.exists(descriptor_path) and os.path.exists(keypoint_path):
-            ref_descriptors[idx] = np.load(descriptor_path)
-            kp_data = np.load(keypoint_path)
-            ref_keypoints[idx] = [
-                cv2.KeyPoint(
-                    x=float(k['x']), y=float(k['y']), size=float(k['size']),
-                    angle=float(k['angle']), response=float(k['response']),
-                    octave=int(k['octave']), class_id=int(k['class_id'])
-                ) for k in kp_data
-            ]
+    with h5py.File(HDF5_PATH, 'r') as f:
+        for idx in df.index.astype(str):
+            if f"descriptors/{idx}" in f:
+                ref_descriptors[int(idx)] = f[f"descriptors/{idx}"][:]
+                kp_data = f[f"keypoints/{idx}"][:]
+                ref_keypoints[int(idx)] = [
+                    cv2.KeyPoint(
+                        x=float(k['x']), y=float(k['y']), size=float(k['size']),
+                        angle=float(k['angle']), response=float(k['response']),
+                        octave=int(k['octave']), class_id=int(k['class_id'])
+                    ) for k in kp_data
+                ]
     return ref_descriptors, ref_keypoints
 
 # Normalize image
 def normalize_image(image):
     if len(image.shape) == 3:
-        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        lab = cv2.merge((l, a, b))
-        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-    else:
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        return clahe.apply(image)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    return clahe.apply(image)
 
-# Detect label regions with PaddleOCR
-def detect_label_regions(image):
+# Run PaddleOCR
+def run_ocr(image):
     try:
-        # Convert to RGB for PaddleOCR
-        if len(image.shape) == 3:
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        else:
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        # Downsample image for OCR
+        max_dim = 800
+        h, w = image.shape[:2]
+        scale = min(max_dim / h, max_dim / w)
+        if scale < 1:
+            image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        
+        # Convert to RGB
+        img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         
         # Run PaddleOCR
-        results = ocr.ocr(img_rgb, cls=True)
+        results = ocr.ocr(img_rgb, cls=False)
         if not results or not results[0]:
-            return [], image
+            return [], [], [""], image
         
-        regions = []
-        bboxes = []
+        regions, bboxes, texts = [], [], []
         min_area = 0.01 * image.shape[0] * image.shape[1]
         
         for line in results[0]:
-            # Extract bounding box and text
-            box = line[0]
-            text = line[1][0]
-            confidence = line[1][1]
+            box, (text, confidence) = line[0], line[1]
             if confidence < OCR_CONFIDENCE_THRESHOLD or len(text.split()) < 3:
                 continue
             
-            # Calculate bounding box coordinates
             x_min = int(min(p[0] for p in box))
             y_min = int(min(p[1] for p in box))
             x_max = int(max(p[0] for p in box))
@@ -233,62 +224,27 @@ def detect_label_regions(image):
             area = w * h
             aspect_ratio = w / float(h) if h > 0 else 0
             
-            if area > min_area and 0.5 < aspect_ratio < 2.0 and w > 100 and h > 100:
+            if area > min_area and 0.5 < aspect_ratio < 2.0 and w > 50 and h > 50:
                 sub_image = image[y_min:y_max, x_min:x_max]
                 regions.append(sub_image)
                 bboxes.append((x_min, y_min, x_max, y_max))
+                texts.append(text)
         
-        # Draw bounding boxes
         img_with_boxes = image.copy()
         for (x_min, y_min, x_max, y_max) in bboxes:
             cv2.rectangle(img_with_boxes, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
         
         regions = sorted(regions, key=lambda r: r.shape[0] * r.shape[1], reverse=True)[:MAX_REGIONS]
-        return regions, img_with_boxes
-    
+        return regions, bboxes, texts, img_with_boxes
     except Exception as e:
-        st.warning(f"Label detection failed: {e}. Processing entire image.")
-        return [image], image
+        st.warning(f"OCR failed: {e}. Processing entire image.")
+        return [image], [], [""], image
 
 # Compute query descriptors
 def compute_query_descriptors(query_img):
-    orb = cv2.ORB_create()
+    orb = cv2.ORB_create(nfeatures=500)
     kp, des = orb.detectAndCompute(query_img, None)
     return kp, des
-
-# Preprocess image for OCR
-def preprocess_image_for_ocr(image):
-    if len(image.shape) > 2:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    image = clahe.apply(image)
-    image = cv2.fastNlMeansDenoising(image, h=10)  # Reduced denoising for PaddleOCR
-    return image
-
-# Extract text with PaddleOCR
-def extract_text(image):
-    try:
-        # Convert to RGB for PaddleOCR
-        if len(image.shape) == 3:
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        else:
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        
-        # Preprocess
-        img_rgb = preprocess_image_for_ocr(img_rgb)
-        
-        # Run PaddleOCR
-        results = ocr.ocr(img_rgb, cls=True)
-        if not results or not results[0]:
-            return ""
-        
-        # Combine high-confidence text
-        texts = [line[1][0] for line in results[0] if line[1][1] >= OCR_CONFIDENCE_THRESHOLD]
-        return ' '.join(texts).strip()
-    
-    except Exception as e:
-        st.warning(f"OCR failed: {e}. Proceeding with feature-based matching only.")
-        return ""
 
 # Clean and match text
 def clean_and_match_text(extracted_text, whiskey_name):
@@ -308,7 +264,7 @@ def clean_and_match_text(extracted_text, whiskey_name):
     whiskey_keywords = set(whiskey_words)
     common_keywords = text_keywords.intersection(whiskey_keywords).intersection(KEYWORDS)
     
-    if len(common_keywords) >= 2:
+    if len(common_keywordsstatements) >= 2:
         return True
     elif len(common_keywords) == 1:
         similarity = fuzz.partial_ratio(cleaned_text, whiskey_name_clean)
@@ -317,49 +273,44 @@ def clean_and_match_text(extracted_text, whiskey_name):
 
 # Find best match
 def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    FLANN_INDEX_LSH = 6
+    index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
+    search_params = dict(checks=50)
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    
     best_match_id = None
     max_good_matches = 0
     best_homography = None
 
+    candidates = []
     for idx, ref_des in ref_descriptors.items():
         if ref_des is not None and query_des is not None:
-            matches = matcher.match(query_des, ref_des)
-            good_matches = [m for m in matches if m.distance < 64]
-            
-            if len(good_matches) > 8:
-                ref_kp = ref_keypoints[idx]
-                src_pts = np.float32([query_kp[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-                dst_pts = np.float32([ref_kp[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-                M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 7.0)
-                if M is not None:
-                    inliers = np.sum(mask)
-                    if inliers > max_good_matches:
-                        max_good_matches = inliers
-                        best_match_id = idx
-                        best_homography = M
+            matches = flann.knnMatch(query_des, ref_des, k=2)
+            good_matches = []
+            for m, n in matches:
+                if m.distance < 0.75 * n.distance:
+                    good_matches.append(m)
+            if len(good_matches) >= 8:
+                candidates.append((idx, good_matches))
+    
+    candidates = sorted(candidates, key=lambda x: len(x[1]), reverse=True)[:5]
+    
+    for idx, good_matches in candidates:
+        ref_kp = ref_keypoints[idx]
+        src_pts = np.float32([query_kp[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([ref_kp[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 7.0)
+        if M is not None:
+            inliers = np.sum(mask)
+            if inliers > max_good_matches:
+                max_good_matches = inliers
+                best_match_id = idx
+                best_homography = M
 
     return best_match_id, max_good_matches
 
-# Validate bottle image
-def is_valid_bottle_image(image):
-    try:
-        if len(image.shape) == 3:
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        else:
-            img_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        
-        results = ocr.ocr(img_rgb, cls=True)
-        if not results or not results[0]:
-            return False
-        text = ' '.join([line[1][0] for line in results[0] if line[1][1] >= OCR_CONFIDENCE_THRESHOLD])
-        return len(text.split()) > 0
-    except Exception as e:
-        st.warning(f"Image validation failed: {e}. Assuming valid image.")
-        return True
-
 # Identify whiskey
-def identify_whiskey(sub_img, ref_descriptors, ref_keypoints):
+def identify_whiskey(sub_img, ref_descriptors, ref_keypoints, extracted_text=""):
     sub_img = normalize_image(sub_img)
     sub_img_resized = cv2.resize(sub_img, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
     query_kp, query_des = compute_query_descriptors(sub_img_resized)
@@ -370,7 +321,6 @@ def identify_whiskey(sub_img, ref_descriptors, ref_keypoints):
     if query_des is None:
         return {"status": "no_features", "sub_img": sub_img}
 
-    extracted_text = extract_text(sub_img_resized)
     best_match_id, num_matches = find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints)
 
     if best_match_id is not None and num_matches >= THRESHOLD:
@@ -440,11 +390,8 @@ def main():
     st.title("Whiskey Googles")
     st.markdown("<h2 style='text-align: center; color: #4a2c0b;'>Identify bottles or search the database</h2>", unsafe_allow_html=True)
 
-    if not os.path.exists(DESCRIPTORS_PATH) or len(os.listdir(DESCRIPTORS_PATH)) < len(df) or \
-       not os.path.exists(KEYPOINTS_PATH) or len(os.listdir(KEYPOINTS_PATH)) < len(df):
-        st.info("Preprocessing reference images. This may take a few minutes...")
+    if not os.path.exists(HDF5_PATH):
         preprocess_references()
-        st.success("Preprocessing complete!")
 
     ref_descriptors, ref_keypoints = load_reference_data()
 
@@ -456,35 +403,36 @@ def main():
         
         if uploaded_file is not None:
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-            query_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            query_img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+            query_img = normalize_image(query_img)
             
-            if not is_valid_bottle_image(query_img):
-                st.error("This image does not appear to contain a whiskey bottle label.")
-            else:
-                with st.spinner("Processing image..."):
-                    regions, img_with_boxes = detect_label_regions(query_img)
-                    st.image(img_with_boxes, channels="BGR", caption="Detected Label Regions", use_container_width=True)
-                    if len(regions) == 0:
-                        st.info("No distinct label regions detected. Processing the entire image.")
-                        regions = [query_img]
-                    else:
-                        st.info(f"Detected {len(regions)} potential whiskey label regions.")
-                    
-                    results = []
-                    with ThreadPoolExecutor() as executor:
-                        futures = [executor.submit(identify_whiskey, sub_img, ref_descriptors, ref_keypoints) for sub_img in regions]
-                        for future in futures:
-                            results.append(future.result())
+            with st.spinner("Processing image..."):
+                regions, bboxes, extracted_texts, img_with_boxes = run_ocr(query_img)
+                st.image(img_with_boxes, channels="GRAY" if len(img_with_boxes.shape) == 2 else "BGR", caption="Detected Label Regions", use_container_width=True)
+                if not regions:
+                    st.info("No distinct label regions detected. Processing the entire image.")
+                    regions = [query_img]
+                    extracted_texts = [""]
+                else:
+                    st.info(f"Detected {len(regions)} potential whiskey label regions.")
                 
-                # Sort results by confidence
+                results = []
+                with ProcessPoolExecutor(max_workers=4) as executor:
+                    futures = [
+                        executor.submit(identify_whiskey, sub_img, ref_descriptors, ref_keypoints, text)
+                        for sub_img, text in zip(regions, extracted_texts + [""] * (len(regions) - len(extracted_texts)))
+                    ]
+                    for future in futures:
+                        results.append(future.result())
+                
                 results = sorted(results, key=lambda x: x.get('confidence', 0), reverse=True)
                 
                 for i, result in enumerate(results):
-                    col1, col2 = st.columns([1, 2])
-                    with col1:
-                        st.image(result["sub_img"], channels="BGR" if len(result["sub_img"].shape) == 3 else "GRAY", caption=f"Detected Region {i+1}", use_container_width=True)
-                    with col2:
-                        if result["status"] in ["success", "low_confidence"]:
+                    if result["status"] in ["success", "low_confidence"]:
+                        col1, col2 = st.columns([1, 2])
+                        with col1:
+                            st.image(result["sub_img"], channels="GRAY" if len(result["sub_img"].shape) == 2 else "BGR", caption=f"Detected Region {i+1}", use_container_width=True)
+                        with col2:
                             whisky_info = result["whisky_info"]
                             st.markdown(f"<div class='result-card'><h3 style='color: black;'>{whisky_info['name']}</h3>", unsafe_allow_html=True)
                             st.write(f"**Spirit Type:** {whisky_info['spirit_type']}")
@@ -499,18 +447,11 @@ def main():
                                 st.warning(f"Low confidence match for {whisky_info['name']}. Verify the result.")
                             if result["text_match"] is None:
                                 st.warning("Text validation skipped due to OCR issues. Match based on image features only.")
-                            elif not result["text_match"]:
-                                pass
-                                # st.warning(f"Text does not match (extracted: '{result['extracted_text']}'), but image features suggest {whisky_info['name']}.")
-                        elif result["status"] == "insufficient_keypoints":
-                            st.write("Insufficient keypoints detected in this region.")
-                        elif result["status"] == "no_features":
-                            st.write("No features detected in this region.")
-                        else:
-                            st.write("No match found for this region.")
+                    else:
+                        st.write(f"Region {i+1}: No match found.")
+                        if result["extracted_text"]:
                             st.write(f"**Extracted Text:** {result['extracted_text']}")
         
-        # Add clear button
         if st.button("Clear Image", key="clear_button"):
             st.session_state.pop("image_uploader", None)
             st.rerun()

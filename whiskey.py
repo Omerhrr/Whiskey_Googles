@@ -275,7 +275,7 @@ def clean_and_match_text(extracted_text, whiskey_name):
 # Find best match
 def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
     FLANN_INDEX_LSH = 6
-    index_params = dict直径=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
+    index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
     search_params = dict(checks=50)
     flann = cv2.FlannBasedMatcher(index_params, search_params)
     

@@ -445,7 +445,7 @@ def main():
                             st.markdown(f"<div class='result-card'><h3 style='color: black;'>{whisky_info['name']}</h3>", unsafe_allow_html=True)
                             st.write(f"**Spirit Type:** {whisky_info['spirit_type']}")
                             st.write(f"**Average Price:** ${whisky_info['avg_msrp']:.2f}")
-                            st.write(f"**Size:** {whisky_info['size']ml}")
+                            st.write(f"**Size:** {whisky_info['size']}ml")
                             st.write(f"**Rank:** {whisky_info['ranking']}")
                             st.write(f"**Total Score:** {whisky_info['total_score']}")
                             st.write(f"**Confidence Score:** {result['confidence']:.2f}")
@@ -459,7 +459,8 @@ def main():
                     else:
                         st.write(f"Region {i+1}: No match found.")
                         if result["extracted_text"]:
-                            st.write(f"**Extracted Text:** {result['extracted_text']}")
+                            pass
+                            # st.write(f"**Extracted Text:** {result['extracted_text']}")
         
         if st.button("Clear Image", key="clear_button"):
             st.session_state.pop("image_uploader", None)

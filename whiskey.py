@@ -145,7 +145,7 @@ st.markdown("""
 page_bg_color = """
 <style>
     .stApp {
-        background-color: #a5867f;
+        background-color: #694e48;
     }
 </style>
 """

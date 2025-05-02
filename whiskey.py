@@ -17,7 +17,7 @@ CSV_FILE = "wine.csv"
 THRESHOLD = 30
 MIN_KEYPOINTS = 50
 MIN_TEXT_SIMILARITY = 80
-IMAGE_SIZE = (320, 240)  # Reduced for speed
+IMAGE_SIZE = (320, 240)
 MAX_REGIONS = 5
 CONFIDENCE_THRESHOLD = 0.7
 OCR_CONFIDENCE_THRESHOLD = 0.8
@@ -119,6 +119,11 @@ def download_image(url, save_path):
     except Exception as e:
         st.error(f"Error downloading {url}: {e}")
 
+# Download image task for ProcessPoolExecutor
+def download_image_task(idx, url, path):
+    if not os.path.exists(path):
+        download_image(url, path)
+
 # Preprocess reference images
 def preprocess_references():
     if os.path.exists(HDF5_PATH):
@@ -127,10 +132,6 @@ def preprocess_references():
     st.info("Preprocessing reference images. This may take a few minutes...")
     
     # Parallel image downloads
-    def download_image_task(idx, url, path):
-        if not os.path.exists(path):
-            download_image(url, path)
-    
     with ProcessPoolExecutor(max_workers=4) as executor:
         futures = [
             executor.submit(download_image_task, idx, row['image_url'], os.path.join(DATASET_PATH, f"{idx}.jpg"))
@@ -264,7 +265,7 @@ def clean_and_match_text(extracted_text, whiskey_name):
     whiskey_keywords = set(whiskey_words)
     common_keywords = text_keywords.intersection(whiskey_keywords).intersection(KEYWORDS)
     
-    if len(common_keywordsstatements) >= 2:
+    if len(common_keywords) >= 2:
         return True
     elif len(common_keywords) == 1:
         similarity = fuzz.partial_ratio(cleaned_text, whiskey_name_clean)
@@ -274,7 +275,7 @@ def clean_and_match_text(extracted_text, whiskey_name):
 # Find best match
 def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
     FLANN_INDEX_LSH = 6
-    index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
+    index_params = dict直径=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
     search_params = dict(checks=50)
     flann = cv2.FlannBasedMatcher(index_params, search_params)
     

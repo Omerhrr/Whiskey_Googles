@@ -35,7 +35,8 @@ for col in ['avg_msrp', 'fair_price', 'shelf_price']:
 
 
 # Extract keywords from wine.csv
-def extract_keywords(df['name']):
+def extract_keywords(df):
+    df = pd.read_csv(CSV_FILE)
     keywords = set()
   
     for name in df['name'].dropna():

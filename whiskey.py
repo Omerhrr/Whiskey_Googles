@@ -244,7 +244,7 @@ def run_ocr(image):
         regions = sorted(regions, key=lambda r: r.shape[0] * r.shape[1], reverse=True)[:MAX_REGIONS]
         return regions, bboxes, texts, img_with_boxes
     except Exception as e:
-        st.warning(f"OCR failed: {e}. Processing entire image.")
+        #st.warning(f"OCR failed: {e}. Processing entire image.")
         return [original_image], [], [""], original_image
 
 # Compute query descriptors

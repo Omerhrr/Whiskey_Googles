@@ -50,10 +50,10 @@ st.markdown("""
 
     <style>
     stApp {
-        background-color: #f0e6d6; 
+        background-color: #0000ff; 
     }
     .main {
-        background-color: #f0e6d6;
+        background-color: #0000ff;
         padding: 20px;
     }
     h1, h2, h3 {
@@ -400,7 +400,7 @@ def search_whiskeys():
 # Streamlit application
 def main():
     st.title("Whiskey Googles")
-    st.markdown("<h2 style='text-align: center; color: #4a2c0b;'>Identify bottles or search the database</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #ffff00;'>Identify bottles or search the database</h2>", unsafe_allow_html=True)
 
     if not os.path.exists(HDF5_PATH):
         preprocess_references()

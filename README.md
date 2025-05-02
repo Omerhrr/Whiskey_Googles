@@ -300,3 +300,9 @@ The goal of Whisky Goggles is to develop a computer vision system that enables u
 ## Demo
 
 The deployed Streamlit app demonstrates identifying whisky bottles from the BAXUS 500-bottle dataset. Upload images to see real-time label detection, text extraction, and bottle matching in color. Access the app at https://whiskey.streamlit.app.
+
+## Demo Video
+
+See Whisky Goggles in action:
+
+[![Whisky Goggles Demo](https://img.youtube.com/vi/_wqAXRh891g/0.jpg)](https://youtu.be/_wqAXRh891g)

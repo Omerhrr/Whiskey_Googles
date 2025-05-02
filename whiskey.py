@@ -389,7 +389,7 @@ def search_whiskeys():
         else:
             st.write(f"Found {len(filtered_df)} whiskeys:")
             st.dataframe(
-                filtered_df[['name', 'spirit_type', 'avg_msrp', 'fair_price', 'shelf_price', 'total_score']],
+                filtered_df[['name', 'spirit_type', 'avg_msrp', 'size', 'ranking', 'total_score']],
                 use_container_width=True
             )
 
@@ -444,17 +444,18 @@ def main():
                             whisky_info = result["whisky_info"]
                             st.markdown(f"<div class='result-card'><h3 style='color: black;'>{whisky_info['name']}</h3>", unsafe_allow_html=True)
                             st.write(f"**Spirit Type:** {whisky_info['spirit_type']}")
-                            st.write(f"**Average MSRP:** ${whisky_info['avg_msrp']:.2f}")
-                            st.write(f"**Fair Price:** ${whisky_info['fair_price']:.2f}")
-                            st.write(f"**Shelf Price:** ${whisky_info['shelf_price']:.2f}")
+                            st.write(f"**Average Price:** ${whisky_info['avg_msrp']:.2f}")
+                            st.write(f"**Size:** ${whisky_info['size']:.2f}")
+                            st.write(f"**Rank:** ${whisky_info['ranking']:.2f}")
                             st.write(f"**Total Score:** {whisky_info['total_score']}")
                             st.write(f"**Confidence Score:** {result['confidence']:.2f}")
-                            st.write(f"**Extracted Text:** {result['extracted_text']}")
+                            # st.write(f"**Extracted Text:** {result['extracted_text']}")
                             st.markdown("</div>", unsafe_allow_html=True)
                             if result["status"] == "low_confidence":
                                 st.warning(f"Low confidence match for {whisky_info['name']}. Verify the result.")
                             if result["text_match"] is None:
-                                st.warning("Text validation skipped due to OCR issues. Match based on image features only.")
+                                pass
+                               # st.warning("Text validation skipped due to OCR issues. Match based on image features only.")
                     else:
                         st.write(f"Region {i+1}: No match found.")
                         if result["extracted_text"]:

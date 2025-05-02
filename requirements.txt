@@ -18,7 +18,7 @@ narwhals==1.36.0
 numpy==2.2.5
 opencv-python-headless==4.11.0.86
 packaging==24.2
-paddlepaddle==3.0.0
+paddlepaddle-gpu==3.0.0
 paddleocr==2.10.0
 pandas==2.2.3
 pillow==11.2.1

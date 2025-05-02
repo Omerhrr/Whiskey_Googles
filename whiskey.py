@@ -274,10 +274,7 @@ def clean_and_match_text(extracted_text, whiskey_name):
 
 # Find best match
 def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
-    FLANN_INDEX_LSH = 6
-    index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
-    search_params = dict(checks=50)
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
     
     best_match_id = None
     max_good_matches = 0
@@ -286,13 +283,11 @@ def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
     candidates = []
     for idx, ref_des in ref_descriptors.items():
         if ref_des is not None and query_des is not None:
-            matches = flann.knnMatch(query_des, ref_des, k=2)
+            matches = bf.knnMatch(query_des, ref_des, k=2)
             good_matches = []
-            for match in matches:
-                if len(match) == 2:  # Ensure at least two matches for Lowe's ratio test
-                    m, n = match
-                    if m.distance < 0.75 * n.distance:
-                        good_matches.append(m)
+            for m, n in matches:  # BFMatcher ensures two matches when k=2
+                if m.distance < 0.75 * n.distance:
+                    good_matches.append(m)
             if len(good_matches) >= 8:
                 candidates.append((idx, good_matches))
     

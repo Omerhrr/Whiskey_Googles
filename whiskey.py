@@ -37,7 +37,7 @@ def extract_keywords(names):
     keywords = set()
     for name in names:
         words = re.findall(r'\b\w+\b', name.lower())
-        words = [w for w in words if len(w) > 3 and not w.isdigit()]
+        words = [w for w in words if len(w) > 2 and not w.isdigit()]  # Relaxed length filter
         keywords.update(words)
     keywords.update(['whisky', 'whiskey', 'single', 'malt', 'bourbon', 'scotch', 'reserve'])
     return keywords
@@ -99,10 +99,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize PaddleOCR
+# Initialize PaddleOCR with improved settings
 @st.cache_resource
 def init_paddle_ocr():
-    return PaddleOCR(use_angle_cls=False, lang='en', use_gpu=False)
+    return PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, det_db_score_mode='slow', det_db_box_type='quad')
 
 ocr = init_paddle_ocr()
 
@@ -184,37 +184,43 @@ def load_reference_data():
                 ]
     return ref_descriptors, ref_keypoints
 
-# Normalize image
-def normalize_image(image):
-    if len(image.shape) == 3:
+# Normalize image (preserve color option)
+def normalize_image(image, preserve_color=False):
+    if len(image.shape) == 3 and not preserve_color:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    return clahe.apply(image)
+    if not preserve_color:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        image = clahe.apply(image)
+    return image
 
-# Run PaddleOCR
+# Run PaddleOCR with improved label detection
 def run_ocr(image):
     try:
+        # Keep original color image
+        original_image = image.copy() if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        
         # Downsample image for OCR
-        max_dim = 800
+        max_dim = 1000  # Increased for better text detection
         h, w = image.shape[:2]
         scale = min(max_dim / h, max_dim / w)
         if scale < 1:
             image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            original_image = cv2.resize(original_image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         
-        # Convert to RGB
+        # Convert to RGB for OCR
         img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         
         # Run PaddleOCR
-        results = ocr.ocr(img_rgb, cls=False)
+        results = ocr.ocr(img_rgb, cls=True)
         if not results or not results[0]:
-            return [], [], [""], image
+            return [], [], [""], original_image
         
         regions, bboxes, texts = [], [], []
-        min_area = 0.01 * image.shape[0] * image.shape[1]
+        min_area = 0.005 * image.shape[0] * image.shape[1]  # Relaxed for smaller labels
         
         for line in results[0]:
             box, (text, confidence) = line[0], line[1]
-            if confidence < OCR_CONFIDENCE_THRESHOLD or len(text.split()) < 3:
+            if confidence < OCR_CONFIDENCE_THRESHOLD or len(text.strip()) < 3:
                 continue
             
             x_min = int(min(p[0] for p in box))
@@ -225,13 +231,13 @@ def run_ocr(image):
             area = w * h
             aspect_ratio = w / float(h) if h > 0 else 0
             
-            if area > min_area and 0.5 < aspect_ratio < 2.0 and w > 50 and h > 50:
-                sub_image = image[y_min:y_max, x_min:x_max]
+            if area > min_area and 0.3 < aspect_ratio < 3.0 and w > 30 and h > 20:  # Relaxed filters
+                sub_image = original_image[y_min:y_max, x_min:x_max]  # Use color image
                 regions.append(sub_image)
                 bboxes.append((x_min, y_min, x_max, y_max))
                 texts.append(text)
         
-        img_with_boxes = image.copy()
+        img_with_boxes = original_image.copy()
         for (x_min, y_min, x_max, y_max) in bboxes:
             cv2.rectangle(img_with_boxes, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
         
@@ -239,7 +245,7 @@ def run_ocr(image):
         return regions, bboxes, texts, img_with_boxes
     except Exception as e:
         st.warning(f"OCR failed: {e}. Processing entire image.")
-        return [image], [], [""], image
+        return [original_image], [], [""], original_image
 
 # Compute query descriptors
 def compute_query_descriptors(query_img):
@@ -247,19 +253,19 @@ def compute_query_descriptors(query_img):
     kp, des = orb.detectAndCompute(query_img, None)
     return kp, des
 
-# Clean and match text
+# Clean and match text with relaxed filtering
 def clean_and_match_text(extracted_text, whiskey_name):
     if not extracted_text:
         return None
     cleaned_text = re.sub(r'[^a-zA-Z\s]', '', extracted_text.lower())
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-    words = [w for w in cleaned_text.split() if len(w) > 3]
+    words = [w for w in cleaned_text.split() if len(w) > 2]  # Relaxed length filter
     cleaned_text = ' '.join(words)
     if not cleaned_text:
         return None
     
     whiskey_name_clean = re.sub(r'[^a-zA-Z\s]', '', whiskey_name.lower()).strip()
-    whiskey_words = [w for w in whiskey_name_clean.split() if len(w) > 3]
+    whiskey_words = [w for w in whiskey_name_clean.split() if len(w) > 2]
     
     text_keywords = set(words)
     whiskey_keywords = set(whiskey_words)
@@ -267,9 +273,12 @@ def clean_and_match_text(extracted_text, whiskey_name):
     
     if len(common_keywords) >= 2:
         return True
-    elif len(common_keywords) == 1:
+    elif len(common_keywords) >= 1:
         similarity = fuzz.partial_ratio(cleaned_text, whiskey_name_clean)
         return similarity >= MIN_TEXT_SIMILARITY
+    elif cleaned_text and whiskey_name_clean:
+        similarity = fuzz.partial_ratio(cleaned_text, whiskey_name_clean)
+        return similarity >= MIN_TEXT_SIMILARITY + 10  # Stricter threshold for no common keywords
     return False
 
 # Find best match
@@ -285,7 +294,7 @@ def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
         if ref_des is not None and query_des is not None:
             matches = bf.knnMatch(query_des, ref_des, k=2)
             good_matches = []
-            for m, n in matches:  # BFMatcher ensures two matches when k=2
+            for m, n in matches:
                 if m.distance < 0.75 * n.distance:
                     good_matches.append(m)
             if len(good_matches) >= 8:
@@ -309,8 +318,9 @@ def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
 
 # Identify whiskey
 def identify_whiskey(sub_img, ref_descriptors, ref_keypoints, extracted_text=""):
-    sub_img = normalize_image(sub_img)
-    sub_img_resized = cv2.resize(sub_img, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
+    # Convert color image to grayscale for feature detection
+    sub_img_gray = normalize_image(sub_img, preserve_color=False)
+    sub_img_resized = cv2.resize(sub_img_gray, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
     query_kp, query_des = compute_query_descriptors(sub_img_resized)
 
     if query_kp is None or len(query_kp) < MIN_KEYPOINTS:
@@ -335,13 +345,13 @@ def identify_whiskey(sub_img, ref_descriptors, ref_keypoints, extracted_text="")
             "extracted_text": extracted_text,
             "text_match": text_match,
             "confidence": combined_confidence,
-            "sub_img": sub_img
+            "sub_img": sub_img  # Return color sub_img
         }
     return {
         "status": "no_match",
         "num_matches": num_matches,
         "extracted_text": extracted_text,
-        "sub_img": sub_img
+        "sub_img": sub_img  # Return color sub_img
     }
 
 # Search functionality
@@ -401,12 +411,12 @@ def main():
         
         if uploaded_file is not None:
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-            query_img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
-            query_img = normalize_image(query_img)
+            query_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)  # Load in color
+            query_img = normalize_image(query_img, preserve_color=True)  # Preserve color
             
             with st.spinner("Processing image..."):
                 regions, bboxes, extracted_texts, img_with_boxes = run_ocr(query_img)
-                st.image(img_with_boxes, channels="GRAY" if len(img_with_boxes.shape) == 2 else "BGR", caption="Detected Label Regions", use_container_width=True)
+                st.image(img_with_boxes, channels="BGR", caption="Detected Label Regions", use_container_width=True)
                 if not regions:
                     st.info("No distinct label regions detected. Processing the entire image.")
                     regions = [query_img]
@@ -429,7 +439,7 @@ def main():
                     if result["status"] in ["success", "low_confidence"]:
                         col1, col2 = st.columns([1, 2])
                         with col1:
-                            st.image(result["sub_img"], channels="GRAY" if len(result["sub_img"].shape) == 2 else "BGR", caption=f"Detected Region {i+1}", use_container_width=True)
+                            st.image(result["sub_img"], channels="BGR", caption=f"Detected Region {i+1}", use_container_width=True)
                         with col2:
                             whisky_info = result["whisky_info"]
                             st.markdown(f"<div class='result-card'><h3 style='color: black;'>{whisky_info['name']}</h3>", unsafe_allow_html=True)

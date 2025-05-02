@@ -91,8 +91,6 @@ st.markdown('<link href="https://fonts.googleapis.com/css2?family=Playfair+Displ
 st.markdown("""
 
     <style>
-    stApp {
-        background-color: #0000ff; 
     }
     .main {
         background-color: #0000ff;
@@ -147,7 +145,7 @@ st.markdown("""
 page_bg_color = """
 <style>
     .stApp {
-        background-color: #0000ff;
+        background-color: #a5867f;
     }
 </style>
 """

@@ -288,9 +288,11 @@ def find_best_match(query_kp, query_des, ref_descriptors, ref_keypoints):
         if ref_des is not None and query_des is not None:
             matches = flann.knnMatch(query_des, ref_des, k=2)
             good_matches = []
-            for m, n in matches:
-                if m.distance < 0.75 * n.distance:
-                    good_matches.append(m)
+            for match in matches:
+                if len(match) == 2:  # Ensure at least two matches for Lowe's ratio test
+                    m, n = match
+                    if m.distance < 0.75 * n.distance:
+                        good_matches.append(m)
             if len(good_matches) >= 8:
                 candidates.append((idx, good_matches))
     

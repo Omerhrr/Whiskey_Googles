@@ -47,9 +47,13 @@ KEYWORDS = extract_keywords(df['name'])
 # Add Google Font and custom CSS
 st.markdown('<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">', unsafe_allow_html=True)
 st.markdown("""
+
     <style>
+    stApp {
+        background-color: #f0e6d6; 
+    }
     .main {
-        background-color: #f5f5f5;
+        background-color: #f0e6d6;
         padding: 20px;
     }
     h1, h2, h3 {

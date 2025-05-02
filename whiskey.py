@@ -7,7 +7,7 @@ import requests
 from paddleocr import PaddleOCR
 import re
 from fuzzywuzzy import fuzz
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import h5py
 
 # Constants
@@ -418,7 +418,7 @@ def main():
                     st.info(f"Detected {len(regions)} potential whiskey label regions.")
                 
                 results = []
-                with ProcessPoolExecutor(max_workers=4) as executor:
+                with ThreadPoolExecutor(max_workers=4) as executor:
                     futures = [
                         executor.submit(identify_whiskey, sub_img, ref_descriptors, ref_keypoints, text)
                         for sub_img, text in zip(regions, extracted_texts + [""] * (len(regions) - len(extracted_texts)))
